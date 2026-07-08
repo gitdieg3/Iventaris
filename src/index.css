@@ -1,0 +1,7 @@
+@import "tailwindcss";
+
+/* Reset background utama biar warnanya soft sesuai referensi UI */
+body {
+  background-color: #f8fafc; /* Warna slate-50 */
+  color: #18181b; /* Warna zinc-900 */
+}
