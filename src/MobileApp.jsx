@@ -12,11 +12,17 @@ export default function MobileApp({ onBack }) {
   const [jasaList, setJasaList] = useState([])
   const [riwayatHariIni, setRiwayatHariIni] = useState([])
   const [isLoading, setIsLoading] = useState(false)
+  const [manualCode, setManualCode] = useState('') 
   
   const [formData, setFormData] = useState({ jumlah: 1, id_jasa: '', catatan: '' })
 
+  // 1. Ambil data jasa hanya SEKALI saat pertama kali buka
   useEffect(() => {
     fetchJasa()
+  }, [])
+
+  // 2. Ambil riwayat hanya saat tab pindah ke 'history'
+  useEffect(() => {
     if (activeTab === 'history') fetchRiwayatHariIni()
   }, [activeTab])
 
@@ -26,23 +32,39 @@ export default function MobileApp({ onBack }) {
   }
 
   const fetchRiwayatHariIni = async () => {
-    // Ambil tanggal hari ini jam 00:00:00
     const startOfDay = new Date()
     startOfDay.setHours(0, 0, 0, 0)
     
     const { data } = await supabase
       .from('barang_keluar')
       .select('*, barang(nama_barang), jasa_pengirim(nama_jasa)')
-      .gte('tanggal_keluar', startOfDay.toISOString()) // Filter khusus hari ini
+      .gte('tanggal_keluar', startOfDay.toISOString())
       .order('tanggal_keluar', { ascending: false })
       
     if (data) setRiwayatHariIni(data)
   }
 
-  const handleScan = async (result) => {
-    if (result && isScanning) {
-      const code = typeof result === 'string' ? result : (result[0]?.rawValue || result.text || result)
+  const handleManualSubmit = async () => {
+    if (!manualCode) return toast.error('Masukkan kode!')
+    
+    const { data, error } = await supabase.from('barang').select('*').eq('kode_unik', manualCode).single()
+    
+    if (error || !data) {
+      toast.error('Kode tidak ditemukan!')
+    } else {
+      setScannedCode(manualCode)
+      setScannedBarang(data)
       setIsScanning(false)
+    }
+  }
+
+  const handleScan = async (result) => {
+    // Kunci biar tidak scan berulang saat proses
+    if (!isScanning) return
+    
+    if (result) {
+      const code = typeof result === 'string' ? result : (result[0]?.rawValue || result.text || result)
+      setIsScanning(false) 
       
       const { data, error } = await supabase.from('barang').select('*').eq('kode_unik', code).single()
       if (error || !data) {
@@ -57,10 +79,10 @@ export default function MobileApp({ onBack }) {
 
   const prosesKeluar = async () => {
     if (!formData.id_jasa) return toast.error('Pilih jasa pengirim!')
-    if (formData.jumlah > scannedBarang.stok) return toast.error('Stok tidak cukup!')
+    if (parseInt(formData.jumlah) > scannedBarang.stok) return toast.error('Stok tidak cukup!')
     
     setIsLoading(true)
-    const sisaStokBaru = scannedBarang.stok - formData.jumlah
+    const sisaStokBaru = scannedBarang.stok - parseInt(formData.jumlah)
     await supabase.from('barang').update({ stok: sisaStokBaru }).eq('id', scannedBarang.id)
     await supabase.from('barang_keluar').insert([{
       id_barang: scannedBarang.id, jumlah: parseInt(formData.jumlah), id_jasa_pengirim: parseInt(formData.id_jasa), catatan: formData.catatan
@@ -69,14 +91,16 @@ export default function MobileApp({ onBack }) {
     toast.success('Stok berhasil dipotong!')
     setScannedCode('')
     setScannedBarang(null)
+    setManualCode('')
     setFormData({ jumlah: 1, id_jasa: '', catatan: '' })
     setIsScanning(true)
     setIsLoading(false)
   }
 
   return (
+    // ... JSX tetap sama seperti sebelumnya ...
     <div className="flex flex-col h-screen bg-slate-50 w-full max-w-md mx-auto relative shadow-2xl overflow-hidden">
-      {/* Header Khusus Mobile */}
+      {/* (Header, Tab Scan, Input Manual, Form Keluar, Riwayat, Bottom Nav tetap sama) */}
       <div className="bg-zinc-900 text-white px-5 py-4 flex justify-between items-center shadow-md z-10">
         <div>
           <h1 className="font-bold text-lg">SoundSys App</h1>
@@ -87,10 +111,7 @@ export default function MobileApp({ onBack }) {
         </button>
       </div>
 
-      {/* Area Konten (Scrollable) */}
       <div className="flex-1 overflow-y-auto pb-24 p-4">
-        
-        {/* --- TAB SCANNER --- */}
         {activeTab === 'scan' && (
           <div className="space-y-4 animate-in fade-in zoom-in-95 duration-300">
             <div className="bg-zinc-900 rounded-2xl overflow-hidden relative min-h-[300px] flex items-center justify-center">
@@ -101,12 +122,29 @@ export default function MobileApp({ onBack }) {
                   <CheckCircle2 size={48} className="text-emerald-400 mb-2" />
                   <p className="font-bold text-lg text-emerald-400">{scannedBarang?.nama_barang}</p>
                   <p className="text-sm text-zinc-400">Sisa Stok: {scannedBarang?.stok}</p>
-                  <button onClick={() => { setScannedCode(''); setIsScanning(true); }} className="mt-4 flex items-center gap-2 px-4 py-2 bg-zinc-800 rounded-lg text-sm">
+                  <button onClick={() => { setScannedCode(''); setIsScanning(true); setManualCode('') }} className="mt-4 flex items-center gap-2 px-4 py-2 bg-zinc-800 rounded-lg text-sm">
                     <RefreshCcw size={16} /> Ulangi
                   </button>
                 </div>
               )}
             </div>
+
+            {isScanning && (
+              <div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100">
+                <div className="flex gap-2">
+                  <input 
+                    type="text" 
+                    placeholder="Atau masukkan kode unik..." 
+                    value={manualCode}
+                    onChange={(e) => setManualCode(e.target.value)}
+                    className="flex-1 border rounded-xl px-4 py-2 text-sm focus:border-emerald-500 outline-none"
+                  />
+                  <button onClick={handleManualSubmit} className="bg-zinc-900 text-white px-4 rounded-xl text-sm font-bold">
+                    Cari
+                  </button>
+                </div>
+              </div>
+            )}
 
             {scannedCode && (
               <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 space-y-4">
@@ -136,7 +174,6 @@ export default function MobileApp({ onBack }) {
           </div>
         )}
 
-        {/* --- TAB RIWAYAT HARI INI --- */}
         {activeTab === 'history' && (
           <div className="animate-in fade-in duration-300">
             <h2 className="font-bold text-zinc-800 mb-4 px-1">Riwayat Scan Hari Ini</h2>
@@ -161,20 +198,12 @@ export default function MobileApp({ onBack }) {
         )}
       </div>
 
-      {/* Navigasi Bawah (Bottom Nav) ala Android */}
       <div className="absolute bottom-0 w-full bg-white border-t border-gray-100 flex justify-around items-center pb-safe pt-2 pb-3 z-20">
-        <button 
-          onClick={() => setActiveTab('scan')} 
-          className="flex flex-col items-center gap-1 p-2 w-20"
-        >
-          {/* Warna hijau emerald seperti di gambar jika aktif */}
+        <button onClick={() => setActiveTab('scan')} className="flex flex-col items-center gap-1 p-2 w-20">
           <ScanLine size={24} className={activeTab === 'scan' ? 'text-emerald-600' : 'text-zinc-400'} />
           <span className={`text-[10px] font-medium ${activeTab === 'scan' ? 'text-emerald-600' : 'text-zinc-400'}`}>Scan</span>
         </button>
-        <button 
-          onClick={() => setActiveTab('history')} 
-          className="flex flex-col items-center gap-1 p-2 w-20"
-        >
+        <button onClick={() => setActiveTab('history')} className="flex flex-col items-center gap-1 p-2 w-20">
           <History size={24} className={activeTab === 'history' ? 'text-emerald-600' : 'text-zinc-400'} />
           <span className={`text-[10px] font-medium ${activeTab === 'history' ? 'text-emerald-600' : 'text-zinc-400'}`}>Hari Ini</span>
         </button>
