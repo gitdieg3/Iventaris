@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Toaster } from 'sonner'
 import { LayoutDashboard, Package, Tags, ScanLine, AudioLines, History, ArrowLeft } from 'lucide-react'
 
@@ -12,11 +12,30 @@ import RiwayatKeluar from './RiwayatKeluar'
 import ScanKeluar from './ScanKeluar'
 
 export default function App() {
-  // State untuk mengontrol tampilan utama (portal | admin | mobile)
-  const [appMode, setAppMode] = useState('portal')
-  
-  // State untuk menu aktif khusus mode admin
-  const [activeTab, setActiveTab] = useState('dashboard')
+
+
+  // 1. State Mode (Portal/Admin/Mobile) dengan localStorage
+  const [appMode, setAppMode] = useState(() => {
+    const savedMode = localStorage.getItem('soundSysMode')
+    // Cek apakah isinya benar-benar salah satu dari 3 mode ini
+    const validModes = ['portal', 'admin', 'mobile']
+    return validModes.includes(savedMode) ? savedMode : 'portal'
+  })
+
+  // 2. State Tab Aktif dengan localStorage
+  const [activeTab, setActiveTab] = useState(() => {
+    const savedTab = localStorage.getItem('soundSysTab')
+    return savedTab ? savedTab : 'dashboard'
+  })
+
+  // 3. Auto-save ke localStorage tiap kali berubah
+  useEffect(() => {
+    localStorage.setItem('soundSysMode', appMode)
+  }, [appMode])
+
+  useEffect(() => {
+    localStorage.setItem('soundSysTab', activeTab)
+  }, [activeTab])
 
   const menuItems = [
     { id: 'dashboard', label: 'Overview', icon: LayoutDashboard },
@@ -65,11 +84,10 @@ export default function App() {
               <button
                 key={item.id}
                 onClick={() => setActiveTab(item.id)}
-                className={`w-full flex items-center gap-3 px-4 py-3.5 rounded-xl transition-all duration-200 text-sm font-medium ${
-                  isActive
+                className={`w-full flex items-center gap-3 px-4 py-3.5 rounded-xl transition-all duration-200 text-sm font-medium ${isActive
                     ? 'bg-zinc-800 text-white shadow-sm'
                     : 'hover:bg-zinc-900 hover:text-zinc-200'
-                }`}
+                  }`}
               >
                 <Icon size={18} strokeWidth={isActive ? 2.5 : 2} />
                 {item.label}
@@ -80,8 +98,11 @@ export default function App() {
 
         {/* Tombol Kembali ke Portal dari Admin */}
         <div className="p-4 border-t border-zinc-800/50">
-          <button 
-            onClick={() => setAppMode('portal')}
+          <button
+            onClick={() => {
+              setAppMode('portal')
+              setActiveTab('dashboard') // Reset tab ke dashboard saat logout
+            }}
             className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-white rounded-xl transition-colors text-sm font-medium"
           >
             <ArrowLeft size={16} /> Kembali ke Portal

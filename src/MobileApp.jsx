@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Scanner } from '@yudiel/react-qr-scanner'
-import { ScanLine, History, LogOut, CheckCircle2, RefreshCcw, PlusCircle, Save } from 'lucide-react'
+import { ScanLine, History, LogOut, CheckCircle2, RefreshCcw, PlusCircle, Save, QrCode } from 'lucide-react'
 import { toast } from 'sonner'
 import { supabase } from './supabase'
 
@@ -18,7 +18,7 @@ export default function MobileApp({ onBack }) {
   const [manualCode, setManualCode] = useState('') 
   
   const [formData, setFormData] = useState({ jumlah: 1, id_jasa: '', catatan: '' })
-  const [inputForm, setInputForm] = useState({ nama: '', id_kategori: '', stok: 0, deskripsi: '' })
+  const [inputForm, setInputForm] = useState({ nama: '', id_kategori: '', stok: 0, deskripsi: '', kode_unik: '' })
 
   useEffect(() => {
     fetchJasa()
@@ -39,46 +39,23 @@ export default function MobileApp({ onBack }) {
     if (data) setKategoriList(data)
   }
 
-  // LOGIKA RIWAYAT GABUNGAN (SCAN KELUAR & INPUT BARU)
   const fetchRiwayatHariIni = async () => {
     const startOfDay = new Date()
     startOfDay.setHours(0, 0, 0, 0)
     const isoStart = startOfDay.toISOString()
     
-    // 1. Ambil data barang keluar (Scan)
-    const { data: dataKeluar } = await supabase
-      .from('barang_keluar')
-      .select('*, barang(nama_barang), jasa_pengirim(nama_jasa)')
-      .gte('tanggal_keluar', isoStart)
+    // PERBAIKAN: Tarik juga kode_unik dari tabel barang
+    const { data: dataKeluar } = await supabase.from('barang_keluar').select('*, barang(nama_barang, kode_unik), jasa_pengirim(nama_jasa)').gte('tanggal_keluar', isoStart)
+    const { data: dataMasuk } = await supabase.from('barang').select('id, nama_barang, kode_unik, stok, created_at').gte('created_at', isoStart)
 
-    // 2. Ambil data input barang baru (Input)
-    const { data: dataMasuk } = await supabase
-      .from('barang')
-      .select('id, nama_barang, stok, created_at')
-      .gte('created_at', isoStart)
-
-    // 3. Format biar seragam
     const formatKeluar = (dataKeluar || []).map(item => ({
-      id: `out_${item.id}`,
-      tipe: 'keluar',
-      nama: item.barang?.nama_barang || 'Barang Dihapus',
-      waktu: item.tanggal_keluar,
-      detail: item.jasa_pengirim?.nama_jasa || '-',
-      jumlah: item.jumlah
+      id: `out_${item.id}`, tipe: 'keluar', nama: item.barang?.nama_barang || 'Barang Dihapus', kode: item.barang?.kode_unik || '-', waktu: item.tanggal_keluar, detail: item.jasa_pengirim?.nama_jasa || '-', jumlah: item.jumlah
     }))
-
     const formatMasuk = (dataMasuk || []).map(item => ({
-      id: `in_${item.id}`,
-      tipe: 'masuk',
-      nama: item.nama_barang,
-      waktu: item.created_at,
-      detail: 'Input Data Baru',
-      jumlah: item.stok
+      id: `in_${item.id}`, tipe: 'masuk', nama: item.nama_barang, kode: item.kode_unik || '-', waktu: item.created_at, detail: 'Input Data Baru', jumlah: item.stok
     }))
 
-    // 4. Gabungin dan urutin dari yang terbaru ke terlama
     const gabungan = [...formatKeluar, ...formatMasuk].sort((a, b) => new Date(b.waktu) - new Date(a.waktu))
-      
     setRiwayatHariIni(gabungan)
   }
 
@@ -99,7 +76,6 @@ export default function MobileApp({ onBack }) {
     if (result) {
       const code = typeof result === 'string' ? result : (result[0]?.rawValue || result.text || result)
       setIsScanning(false) 
-      
       const { data, error } = await supabase.from('barang').select('*').eq('kode_unik', code).single()
       if (error || !data) {
         toast.error('QR tidak valid!')
@@ -118,17 +94,31 @@ export default function MobileApp({ onBack }) {
     setIsLoading(true)
     const sisaStokBaru = scannedBarang.stok - parseInt(formData.jumlah)
     await supabase.from('barang').update({ stok: sisaStokBaru }).eq('id', scannedBarang.id)
-    await supabase.from('barang_keluar').insert([{
-      id_barang: scannedBarang.id, jumlah: parseInt(formData.jumlah), id_jasa_pengirim: parseInt(formData.id_jasa), catatan: formData.catatan
-    }])
+    await supabase.from('barang_keluar').insert([{ id_barang: scannedBarang.id, jumlah: parseInt(formData.jumlah), id_jasa_pengirim: parseInt(formData.id_jasa), catatan: formData.catatan }])
     
     toast.success('Stok berhasil dipotong!')
-    setScannedCode('')
-    setScannedBarang(null)
-    setManualCode('')
+    setScannedCode(''); setScannedBarang(null); setManualCode('')
     setFormData({ jumlah: 1, id_jasa: '', catatan: '' })
-    setIsScanning(true)
-    setIsLoading(false)
+    setIsScanning(true); setIsLoading(false)
+  }
+
+  const generateKode = () => {
+    const randomStr = Math.random().toString(36).substring(2, 7).toUpperCase()
+    return `SND-${randomStr}`
+  }
+
+  const handleInputBaru = (e) => {
+    const { name, value } = e.target
+    let newForm = { ...inputForm, [name]: value }
+
+    if (name === 'nama') {
+      if (value.length > 0 && !inputForm.kode_unik) {
+        newForm.kode_unik = generateKode()
+      } else if (value.length === 0) {
+        newForm.kode_unik = '' 
+      }
+    }
+    setInputForm(newForm)
   }
 
   const simpanBarangBaru = async () => {
@@ -137,11 +127,8 @@ export default function MobileApp({ onBack }) {
     }
     
     setIsLoading(true)
-    const randomStr = Math.random().toString(36).substring(2, 7).toUpperCase()
-    const kodeUnikBaru = `SND-${randomStr}`
-
     const { error } = await supabase.from('barang').insert([{
-      kode_unik: kodeUnikBaru,
+      kode_unik: inputForm.kode_unik, 
       nama_barang: inputForm.nama,
       id_kategori: parseInt(inputForm.id_kategori),
       stok: parseInt(inputForm.stok),
@@ -152,8 +139,7 @@ export default function MobileApp({ onBack }) {
       toast.error(`Gagal menyimpan: ${error.message}`)
     } else {
       toast.success(`Barang baru berhasil ditambahkan!`)
-      setInputForm({ nama: '', id_kategori: '', stok: 0, deskripsi: '' }) 
-      // Otomatis arahkan bapak lu ke tab history biar dia liat hasilnya
+      setInputForm({ nama: '', id_kategori: '', stok: 0, deskripsi: '', kode_unik: '' }) 
       setActiveTab('history')
     }
     setIsLoading(false)
@@ -190,7 +176,7 @@ export default function MobileApp({ onBack }) {
                 </div>
               )}
             </div>
-
+            
             {isScanning && (
               <div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100">
                 <div className="flex gap-2">
@@ -236,26 +222,35 @@ export default function MobileApp({ onBack }) {
                 <PlusCircle size={20} className="text-emerald-600" />
                 <h3 className="font-semibold text-zinc-800">Daftar Barang Baru</h3>
               </div>
+
+              {inputForm.kode_unik && (
+                <div className="bg-slate-50 border border-slate-200 p-4 rounded-xl flex flex-col items-center justify-center mb-2 animate-in zoom-in duration-300">
+                  <QrCode size={36} className="text-zinc-400 mb-1" strokeWidth={1.5} />
+                  <p className="font-mono font-bold text-lg text-zinc-800 tracking-widest">{inputForm.kode_unik}</p>
+                  <p className="text-[10px] text-zinc-400 uppercase tracking-wider">Kode Barang</p>
+                </div>
+              )}
+
               <div>
                 <label className="text-xs font-medium text-zinc-500">Nama Barang</label>
-                <input type="text" value={inputForm.nama} onChange={(e) => setInputForm({...inputForm, nama: e.target.value})} placeholder="Contoh: Kabel Audio 10m" className="w-full border rounded-xl px-3 py-2.5 text-sm focus:border-emerald-500 outline-none mt-1" />
+                <input type="text" name="nama" value={inputForm.nama} onChange={handleInputBaru} placeholder="Contoh: Kabel Audio 10m" className="w-full border rounded-xl px-3 py-2.5 text-sm focus:border-emerald-500 outline-none mt-1" />
               </div>
               <div className="flex gap-3">
                 <div className="flex-[2]">
                   <label className="text-xs font-medium text-zinc-500">Kategori</label>
-                  <select value={inputForm.id_kategori} onChange={(e) => setInputForm({...inputForm, id_kategori: e.target.value})} className="w-full border rounded-xl px-3 py-2.5 text-sm focus:border-emerald-500 outline-none mt-1 bg-white">
+                  <select name="id_kategori" value={inputForm.id_kategori} onChange={handleInputBaru} className="w-full border rounded-xl px-3 py-2.5 text-sm focus:border-emerald-500 outline-none mt-1 bg-white">
                     <option value="">Pilih Kategori</option>
                     {kategoriList.map(k => <option key={k.id} value={k.id}>{k.nama_kategori}</option>)}
                   </select>
                 </div>
                 <div className="flex-1">
                   <label className="text-xs font-medium text-zinc-500">Stok Awal</label>
-                  <input type="number" min="0" value={inputForm.stok} onChange={(e) => setInputForm({...inputForm, stok: e.target.value})} className="w-full border rounded-xl px-3 py-2.5 text-sm focus:border-emerald-500 outline-none mt-1" />
+                  <input type="number" name="stok" min="0" value={inputForm.stok} onChange={handleInputBaru} className="w-full border rounded-xl px-3 py-2.5 text-sm focus:border-emerald-500 outline-none mt-1" />
                 </div>
               </div>
               <div>
                 <label className="text-xs font-medium text-zinc-500">Catatan / Deskripsi</label>
-                <textarea value={inputForm.deskripsi} onChange={(e) => setInputForm({...inputForm, deskripsi: e.target.value})} placeholder="Spesifikasi barang..." rows="2" className="w-full border rounded-xl px-3 py-2.5 text-sm focus:border-emerald-500 outline-none mt-1 resize-none"></textarea>
+                <textarea name="deskripsi" value={inputForm.deskripsi} onChange={handleInputBaru} placeholder="Spesifikasi barang..." rows="2" className="w-full border rounded-xl px-3 py-2.5 text-sm focus:border-emerald-500 outline-none mt-1 resize-none"></textarea>
               </div>
               <button onClick={simpanBarangBaru} disabled={isLoading} className="w-full flex items-center justify-center gap-2 bg-zinc-900 hover:bg-zinc-800 text-white py-3 rounded-xl font-medium mt-4 transition-colors disabled:opacity-70">
                 {isLoading ? 'Menyimpan...' : <><Save size={18} /> Simpan Data</>}
@@ -275,8 +270,11 @@ export default function MobileApp({ onBack }) {
                 {riwayatHariIni.map((item) => (
                   <div key={item.id} className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 flex justify-between items-center">
                     <div>
+                      {/* PERBAIKAN: Kode Unik dimunculin di sini */}
+                      <p className="font-mono text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded inline-block mb-1 border border-indigo-100">{item.kode}</p>
+                      
                       <p className="font-semibold text-zinc-900 text-sm">{item.nama}</p>
-                      <p className="text-xs text-zinc-500 mt-1">{new Date(item.waktu).toLocaleTimeString('id-ID', {hour: '2-digit', minute:'2-digit'})} • {item.detail}</p>
+                      <p className="text-xs text-zinc-500 mt-0.5">{new Date(item.waktu).toLocaleTimeString('id-ID', {hour: '2-digit', minute:'2-digit'})} • {item.detail}</p>
                     </div>
                     <div className={`px-3 py-1 rounded-lg font-bold text-sm ${item.tipe === 'keluar' ? 'bg-red-50 text-red-600' : 'bg-emerald-50 text-emerald-600'}`}>
                       {item.tipe === 'keluar' ? '-' : '+'}{item.jumlah}

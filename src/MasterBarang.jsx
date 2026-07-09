@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { QRCodeCanvas } from 'qrcode.react' // Kita ganti ke Canvas biar gampang di-download jadi PNG
+import { QRCodeCanvas } from 'qrcode.react' 
 import { Package, QrCode, Save, Printer, Trash2, LayoutList, Edit, Search, ChevronLeft, ChevronRight, Eye, X, Download } from 'lucide-react'
 import { toast } from 'sonner'
 import { supabase } from './supabase'
@@ -68,6 +68,17 @@ export default function MasterBarang() {
       toast.error('Nama barang, Kategori, dan Stok wajib diisi!')
       return
     }
+
+    // --- FITUR ANTI-DUPLIKAT (Ditambahkan di sini) ---
+    const isDuplicate = barangList.some(
+      (item) => item.nama_barang.toLowerCase() === formData.nama.toLowerCase() && item.id !== editId
+    )
+
+    if (isDuplicate) {
+      toast.error(`Gagal: Barang "${formData.nama}" sudah terdaftar di sistem!`)
+      return 
+    }
+    // --------------------------------------------------
 
     setIsLoading(true)
     
